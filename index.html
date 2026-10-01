@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<title>Image + BGM Player</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  html, body {
+    height:100%; width:100%;
+    overflow:hidden;
+    background:#000;
+    overscroll-behavior:none;
+  }
+
+  body {
+    position:fixed; inset:0;
+    color:#fff;
+    user-select:none; -webkit-user-select:none;
+  }
+
+  #stage {
+    position:absolute; inset:0;
+    overflow:hidden;
+    background:#000;
+    display:flex; align-items:center; justify-content:center;
+    touch-action: none;
+  }
+
+  /* WRAPPER — di-scale otomatis oleh JS */
+  #imageWrap {
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    transform-origin: 50% 50%;
+    will-change: transform;
+    backface-visibility: hidden;
+    /* scale awal, akan di-override oleh JS */
+    transform: scale(0.5);
+  }
+
+  #bgImage {
+    width:100%; height:100%;
+    object-fit: contain;
+    background:#000;
+    display:block;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+
+  #lockLayer {
+    position:absolute; inset:0;
+    z-index:9999;
+    background:transparent;
+    touch-action: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+
+  <div id="imageWrap">
+    <img id="bgImage"
+         src="https://kangmudmalinganjingzepetobangkeanjing.my.id/zepetokenthusamakangmod/zptNGENKANGMOD.png"
+         alt=""
+         draggable="false">
+  </div>
+
+  <audio id="bgm"
+         src="https://kangmudmalinganjingzepetobangkeanjing.my.id/zepetokenthusamakangmod/iniparahini.mp3"
+         loop
+         preload="auto"></audio>
+
+  <div id="lockLayer"></div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const bgm       = document.getElementById('bgm');
+  const lockLayer = document.getElementById('lockLayer');
+  const imageWrap = document.getElementById('imageWrap');
+  const bgImage   = document.getElementById('bgImage');
+
+  /* =========================================================
+     KONFIGURASI
+  ========================================================= */
+  const VOLUME         = 1.0;    // 0.0 - 1.0
+
+  // Mode auto-fit:
+  //   true  = hitung otomatis supaya gambar muat di layar webview
+  //   false = pakai angka manual di bawah
+  const AUTO_FIT       = true;
+  const MANUAL_SCALE   = 0.5;    // dipakai kalau AUTO_FIT = false
+
+  // Padding: makin besar, gambar makin kecil (ada margin lebih lega)
+  //   1.00 = mepet tepi
+  //   0.90 = ada margin 10% (default)
+  //   0.75 = margin lega
+  const PADDING        = 0.90;
+
+  // Faktor ekstra kalau webview kamu masih kelihatan kegedean.
+  //   1.00 = normal
+  //   0.85 = dikecilkan 15% dari hasil auto-fit
+  //   0.70 = dikecilkan 30%
+  const EXTRA_SHRINK   = 0.85;
+
+  // Batas minimal & maksimal scale (biar tidak terlalu ekstrem)
+  const MIN_SCALE      = 0.15;
+  const MAX_SCALE      = 1.00;
+
+  let started = false;
+
+  /* =========================================================
+     AUTO ZOOM OUT — HITUNG SCALE YANG PAS
+  ========================================================= */
+  function applyAutoZoomOut() {
+    let scale;
+
+    if (!AUTO_FIT) {
+      scale = MANUAL_SCALE;
+    } else {
+      // 1. Deteksi zoom webview kalau ada visualViewport API
+      let webviewZoom = 1;
+      const vv = window.visualViewport;
+      if (vv && vv.scale && vv.scale > 0) {
+        webviewZoom = vv.scale;
+      }
+
+      // 2. Hitung rasio gambar vs layar (pakai contain, jadi kita
+      //    hitung berdasarkan ukuran "natural" gambar vs viewport)
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      let imgRatio = 1;
+      if (bgImage.naturalWidth && bgImage.naturalHeight) {
+        imgRatio = bgImage.naturalWidth / bgImage.naturalHeight;
+      }
+      const screenRatio = vw / vh;
+
+      // Rasio "fit" — kalau gambar lebih lebar dari layar, gambar
+      // akan lebih kecil di sisi atas/bawah, dst.
+      let fitRatio;
+      if (imgRatio > screenRatio) {
+        // Gambar lebih lebar -> fit di lebar
+        fitRatio = screenRatio / imgRatio;
+        // Rasio ini < 1 -> perlu mengecil sedikit
+        // Tapi karena kita pakai object-fit: contain, gambar sudah
+        // otomatis fit. Yang perlu kita kompensasi cuma webview zoom.
+        fitRatio = 1;
+      } else {
+        fitRatio = 1;
+      }
+
+      // 3. Total scale = kompensasi webview zoom × padding × extra shrink
+      scale = (1 / webviewZoom) * PADDING * EXTRA_SHRINK * fitRatio;
+
+      // 4. Clamp biar tidak ekstrem
+      scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
+    }
+
+    imageWrap.style.transform = 'scale(' + scale + ')';
+    console.log('[AutoFit] scale =', scale.toFixed(3),
+                '| webviewZoom =', (window.visualViewport && window.visualViewport.scale) || 1,
+                '| viewport =', window.innerWidth + 'x' + window.innerHeight);
+  }
+
+  // Panggil saat gambar selesai dimuat (biar tahu ukuran naturalnya)
+  if (bgImage.complete) {
+    applyAutoZoomOut();
+  } else {
+    bgImage.addEventListener('load', applyAutoZoomOut);
+  }
+
+  // Update saat resize, rotate, atau zoom berubah
+  window.addEventListener('resize', applyAutoZoomOut);
+  window.addEventListener('orientationchange', function () {
+    setTimeout(applyAutoZoomOut, 200);
+    setTimeout(applyAutoZoomOut, 500);   // sekali lagi setelah rotasi selesai
+  });
+
+  // Update saat user pinch-zoom (visualViewport)
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', applyAutoZoomOut);
+    window.visualViewport.addEventListener('scroll', applyAutoZoomOut);
+  }
+
+  /* =========================================================
+     AUDIO BG
+  ========================================================= */
+  bgm.loop   = true;
+  bgm.volume = VOLUME;
+
+  function startBGM() {
+    if (started) return;
+    started = true;
+
+    const p = bgm.play();
+    if (p && p.catch) {
+      p.catch(function (err) {
+        console.warn('[BGM] play gagal:', err.name, '-', err.message);
+        started = false;
+      });
+    }
+  }
+
+  /* =========================================================
+     PEMICU: TAP DI MANA SAJA
+  ========================================================= */
+  ['click','touchstart','pointerdown','mousedown','keydown'].forEach(function (evt) {
+    document.addEventListener(evt, function (e) {
+      if (!started) {
+        if (e.cancelable) e.preventDefault();
+        startBGM();
+      }
+    }, { passive: false, capture: true });
+  });
+
+  /* =========================================================
+     JAGA AUDIO TETAP JALAN
+  ========================================================= */
+  bgm.addEventListener('pause', function () {
+    if (started && !bgm.ended) {
+      setTimeout(function () {
+        if (bgm.paused) bgm.play().catch(function(){});
+      }, 200);
+    }
+  });
+
+  bgm.addEventListener('ended', function () {
+    if (started) {
+      bgm.currentTime = 0;
+      bgm.play().catch(function(){});
+    }
+  });
+
+  setInterval(function () {
+    if (started && bgm.paused && !bgm.ended) {
+      bgm.play().catch(function(){});
+    }
+  }, 1000);
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && started && bgm.paused) {
+      bgm.play().catch(function(){});
+    }
+  });
+
+  /* =========================================================
+     BLOKIR INTERAKSI LAIN
+  ========================================================= */
+  const stop = function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  };
+
+  ['touchstart','touchmove','touchend','touchcancel',
+   'mousedown','mousemove','mouseup','dblclick',
+   'contextmenu','wheel','gesturestart','gesturechange','gestureend',
+   'pointerdown','pointermove','pointerup','pointercancel']
+    .forEach(function (evt) {
+      lockLayer.addEventListener(evt, stop, { passive: false });
+    });
+
+  document.addEventListener('gesturestart',  function(e){ e.preventDefault(); }, { passive:false });
+  document.addEventListener('gesturechange', function(e){ e.preventDefault(); }, { passive:false });
+  document.addEventListener('gestureend',    function(e){ e.preventDefault(); }, { passive:false });
+  document.addEventListener('contextmenu',   function(e){ e.preventDefault(); }, { passive:false });
+  document.addEventListener('dragstart',     function(e){ e.preventDefault(); }, { passive:false });
+
+  document.addEventListener('keydown', function (e) {
+    const keys = [' ','Spacebar','ArrowLeft','ArrowRight','ArrowUp','ArrowDown',
+                  'k','j','l','m','f','Home','End','PageUp','PageDown'];
+    if (keys.indexOf(e.key) !== -1 || e.keyCode === 32) {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    }
+  }, { passive:false });
+
+})();
+</script>
+</body>
+</html>

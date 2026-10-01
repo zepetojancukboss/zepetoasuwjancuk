@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<title>Image + BGM Player</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  html, body {
+    height:100%; width:100%;
+    overflow:hidden;
+    background:#000;
+    overscroll-behavior:none;
+  }
+
+  body {
+    position:fixed; inset:0;
+    color:#fff;
+    user-select:none; -webkit-user-select:none;
+  }
+
+  #stage {
+    position:absolute; inset:0;
+    overflow:hidden;
+    background:#000;
+    display:flex; align-items:center; justify-content:center;
+    touch-action: none;
+  }
+
+  /* GAMBAR FULLSCREEN */
+  #bgImage {
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    object-fit: cover;          /* isi penuh layar, crop kalau perlu */
+    /* Kalau mau utuh tanpa crop, ganti jadi: contain */
+    background:#000;
+    display:block;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+
+  /* LOCK OVERLAY — menangkap semua sentuhan */
+  #lockLayer {
+    position:absolute; inset:0;
+    z-index:9999;
+    background:transparent;
+    touch-action: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+
+  <!-- GANTI URL DI BAWAH DENGAN FILE GAMBAR DI HOSTING KAMU -->
+  <img id="bgImage"
+       src="https://kangmudmalinganjingzepetobangkeanjing.my.id/zepetokenthusamakangmod/zptNGENKANGMOD.png"
+       alt=""
+       draggable="false">
+
+  <!-- GANTI URL DI BAWAH DENGAN FILE AUDIO BG MUSIK DI HOSTING KAMU -->
+  <audio id="bgm"
+         src="https://kangmudmalinganjingzepetobangkeanjing.my.id/zepetokenthusamakangmod/iniparahini.mp3"
+         loop
+         preload="auto"></audio>
+
+  <div id="lockLayer"></div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const bgm      = document.getElementById('bgm');
+  const lockLayer= document.getElementById('lockLayer');
+
+  /* =========================================================
+     KONFIGURASI
+  ========================================================= */
+  const VOLUME = 1.0;   // 0.0 - 1.0
+
+  let started = false;
+
+  bgm.loop   = true;
+  bgm.volume = VOLUME;
+
+  /* =========================================================
+     MULAI AUDIO (dipicu tap/klik di mana saja)
+  ========================================================= */
+  function startBGM() {
+    if (started) return;
+    started = true;
+
+    const p = bgm.play();
+    if (p && p.catch) {
+      p.catch(function (err) {
+        console.warn('[BGM] play gagal:', err.name, '-', err.message);
+        started = false;   // izinkan tap ulang
+      });
+    }
+  }
+
+  /* =========================================================
+     PEMICU: TAP DI MANA SAJA
+     Pakai capture:true supaya tetap tertangkap walaupun nanti
+     ada overlay lain yang nutupin.
+  ========================================================= */
+  ['click','touchstart','pointerdown','mousedown','keydown'].forEach(function (evt) {
+    document.addEventListener(evt, function (e) {
+      if (!started) {
+        if (e.cancelable) e.preventDefault();
+        startBGM();
+      }
+    }, { passive: false, capture: true });
+  });
+
+  /* =========================================================
+     JAGA AUDIO TETAP JALAN
+  ========================================================= */
+  // Kalau audio berhenti bukan karena user pause → play lagi
+  bgm.addEventListener('pause', function () {
+    if (started && !bgm.ended) {
+      setTimeout(function () {
+        if (bgm.paused) bgm.play().catch(function(){});
+      }, 200);
+    }
+  });
+
+  // Kalau audio habis (meskipun loop=true) → restart manual
+  bgm.addEventListener('ended', function () {
+    if (started) {
+      bgm.currentTime = 0;
+      bgm.play().catch(function(){});
+    }
+  });
+
+  // Cek tiap 1 detik, kalau mandek → paksa play
+  setInterval(function () {
+    if (started && bgm.paused && !bgm.ended) {
+      bgm.play().catch(function(){});
+    }
+  }, 1000);
+
+  // Saat tab kembali aktif
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && started && bgm.paused) {
+      bgm.play().catch(function(){});
+    }
+  });
+
+  /* =========================================================
+     BLOKIR INTERAKSI LAIN (biar benar-benar terkunci)
+  ========================================================= */
+  const stop = function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  };
+
+  // Blokir di lockLayer supaya gambar tidak bisa di-drag / di-zoom / dsb
+  ['touchstart','touchmove','touchend','touchcancel',
+   'mousedown','mousemove','mouseup','dblclick',
+   'contextmenu','wheel','gesturestart','gesturechange','gestureend',
+   'pointerdown','pointermove','pointerup','pointercancel']
+    .forEach(function (evt) {
+      lockLayer.addEventListener(evt, stop, { passive: false });
+    });
+
+  // Blokir global (pinch, context menu, dsb)
+  document.addEventListener('gesturestart',  function(e){ e.preventDefault(); }, { passive:false });
+  document.addEventListener('gesturechange', function(e){ e.preventDefault(); }, { passive:false });
+  document.addEventListener('gestureend',    function(e){ e.preventDefault(); }, { passive:false });
+  document.addEventListener('contextmenu',   function(e){ e.preventDefault(); }, { passive:false });
+  document.addEventListener('dragstart',     function(e){ e.preventDefault(); }, { passive:false });
+
+  // Blokir keyboard media (spasi, panah, dll)
+  document.addEventListener('keydown', function (e) {
+    const keys = [' ','Spacebar','ArrowLeft','ArrowRight','ArrowUp','ArrowDown',
+                  'k','j','l','m','f','Home','End','PageUp','PageDown'];
+    if (keys.indexOf(e.key) !== -1 || e.keyCode === 32) {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    }
+  }, { passive:false });
+
+})();
+</script>
+</body>
+</html>
